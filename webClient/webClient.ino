@@ -1,22 +1,28 @@
+
 /*
 
  Some code to interact between http server and hardware.
  
  Circuit:
  * Ethernet
- * Led connected on pin 8
+ * Led red connected on pin 8
+ * Led green connected on pin 7
+ * Push button connected on pin 2
  
+ Works with code http://test-fccagou.rhcloud.com/arduino.html
 
  created Nov 09 2014
  by Francois Chenais
-
+ 
  This code is in the public domain.
+
  
  */
 
 #include <SPI.h>
 #include <Ethernet.h>
 
+#include <urllib.h>
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
@@ -28,26 +34,46 @@ IPAddress ip(192,168,1,20);
 // initialize the library instance:
 EthernetClient client;
 
-const unsigned long requestInterval = 3000;  // delay between requests
+const unsigned long requestInterval = 1000;  // delay between requests
+
+/* When tested on local network.
 
 char serverName[] = "192.168.1.2";
 int serverPort = 8051;
 
+*/
+
+char serverName[] = "test-fccagou.rhcloud.com";
+int serverPort = 80;
+
 unsigned long lastAttemptTime = 0;
 String http_response = "";
 
+int ledVerte = 7;
 int ledRouge = 8;
+
+Urllib url;
+
+
+// Bouton
+const int buttonPin = 2;
+int buttonState = 0;
+int buttonStatePrev = 0;
 
 
 
 void setup() {
+
+  pinMode(buttonPin, INPUT);
+
+  pinMode(ledVerte, OUTPUT);
   pinMode(ledRouge, OUTPUT);
   // reserve space for the strings:
   http_response.reserve(512);
 
- // Open serial communications and wait for port to open:
+  // Open serial communications and wait for port to open:
   Serial.begin(9600);
-   while (!Serial) {
+  while (!Serial) {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
 
@@ -69,34 +95,75 @@ void setup() {
 void loop()
 {
 
-  http_request(serverName, serverPort, "/arduino/led1/get");
-  
-  Serial.print("Led1: "); 
-  Serial.println(http_response);
 
-  switch (http_response[0]) {
+  buttonState = digitalRead(buttonPin);
 
-    case '0':
+  if (buttonState != buttonStatePrev) 
+  {
+      
+    if (buttonState == HIGH) {
+      digitalWrite(ledRouge, HIGH);  
+      digitalWrite(ledVerte, HIGH);  
+      http_request(serverName, serverPort, "/arduino/led1/set/1");
+      http_request(serverName, serverPort, "/arduino/led2/set/1");
+    } 
+    else {
       digitalWrite(ledRouge, LOW);
-      break;
+      digitalWrite(ledVerte, LOW);
+      http_request(serverName, serverPort, "/arduino/led1/set/0");    
+      http_request(serverName, serverPort, "/arduino/led2/set/0");
+    }
+  
+    buttonStatePrev = buttonState;
+    
+    Serial.print("Led1: "); 
+    Serial.println(http_response);
 
-    case '1':
-      digitalWrite(ledRouge, HIGH);
-      break;
-    
-   }
-    
-  
-  int time2wait = lastAttemptTime + requestInterval - millis() ;
-  
-  if ( time2wait > 0 ) {
+  } else {
+
+    http_request(serverName, serverPort, "/arduino/led1/get/");    
+
+    switch (http_response[0]) {
+   
+       case '0':
+         digitalWrite(ledRouge, LOW);
+         break;
+   
+       case '1':
+         digitalWrite(ledRouge, HIGH);
+         break;
+   
+    }
+
+
+    http_request(serverName, serverPort, "/arduino/led2/get/");    
+
+    switch (http_response[0]) {
+   
+       case '0':
+         digitalWrite(ledVerte, LOW);
+         break;
+   
+       case '1':
+         digitalWrite(ledVerte, HIGH);
+         break;
+   
+    }
+
+   
+   
+    int time2wait = lastAttemptTime + requestInterval - millis() ;
+   
+    if ( time2wait > 0 ) {
     // if you're not connected, and two minutes have passed since
     // your last connection, then attempt to connect again:
-    Serial.print("Waiting ");
-    Serial.print( time2wait / 1000 );
-    Serial.println (" sec before next request");
-    
-    delay(time2wait);
+        Serial.print("Waiting ");
+        Serial.print( time2wait / 1000 );
+        Serial.println (" sec before next request");
+   
+        delay(time2wait);
+    }
+   
   }
 }
 
@@ -106,7 +173,7 @@ void loop()
 
 
 void http_request(char * server, int port, char *path) {
-  
+
   bool inBody = false;
   int nbNl = 0;
 
@@ -115,17 +182,17 @@ void http_request(char * server, int port, char *path) {
   Serial.print(server);
   Serial.print(" on port ");
   Serial.println(port);
-  
+
   while ( ! client.connect(server, port) ) {
     Serial.print("connecting to server...");
     Serial.print(server);
     Serial.print(" on port ");
     Serial.println(port);
-    
+
   }
-  
+
   Serial.println("making HTTP request...");
-  
+
   // make HTTP GET request to twitter:
   client.print("GET ");
   client.print(path);
@@ -134,58 +201,61 @@ void http_request(char * server, int port, char *path) {
   client.println(server);
   client.println("Connection: close");
   client.println();
-  
+
   http_response = "";
   while (client.connected()) {
     while (client.available()) {
       // read incoming bytes:
       char inChar = client.read();
-//      Serial.print("[");
+      //      Serial.print("[");
       Serial.print(inChar);
-//      Serial.print("]");
-   
+      //      Serial.print("]");
+
       if (inBody) {
-          http_response += inChar;
-      } else {
-       
+        http_response += inChar;
+      } 
+      else {
+
         switch(inChar) {
-          
-          case '\n':
-          
-            if (nbNl == 1) {
-//              Serial.println("HEADER-END");
-//              Serial.println("BODY-BEGIN");
-              inBody = true;
-            } else {
-              nbNl++;
-            }
-         
-//            Serial.print("NBnl: ");
-//            Serial.println(nbNl);
-            break;
-            
-         case '\r':
-           break;
-           
-         default:   
-            nbNl = 0;
-            break;
+
+        case '\n':
+
+          if (nbNl == 1) {
+            //              Serial.println("HEADER-END");
+            //              Serial.println("BODY-BEGIN");
+            inBody = true;
+          } 
+          else {
+            nbNl++;
+          }
+
+          //            Serial.print("NBnl: ");
+          //            Serial.println(nbNl);
+          break;
+
+        case '\r':
+          break;
+
+        default:   
+          nbNl = 0;
+          break;
         }
       }  
     }
-   
+
     if (inBody) {
-      
+
       Serial.print("\nGot VALUE (");
       Serial.print(http_response);
       Serial.println(")");
       inBody = false;
     }
   }
-  
+
   client.stop();
-  
+
   // note the time of this connect attempt:
   lastAttemptTime = millis();
 }   
+
 
